@@ -13,13 +13,25 @@ function sanitize(name: string): string {
   return name.replace(/[/\\?%*:|"<>]/g, '_');
 }
 
-/** True when the browser supports the File System Access API (folder picker) */
-export function supportsFolderPicker(): boolean {
-  return typeof (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function';
+/** True when running inside a Capacitor native wrapper (Android/iOS APK) */
+function isCapacitor(): boolean {
+  return !!(window as Record<string, unknown>)['Capacitor'];
 }
 
-// ─── Download a single file ───────────────────────────────────────────────────
+/** True when the browser supports the File System Access API (folder picker) */
+export function supportsFolderPicker(): boolean {
+  return typeof (window as Record<string, unknown>)['showDirectoryPicker'] === 'function';
+}
 
+// ─── Core download helper — works in both browser and Capacitor WebView ───────
+//
+// In a standard browser:  creates a blob URL → clicks a hidden <a> → browser
+//   downloads to the Downloads folder.
+//
+// In Capacitor WebView:   same path — Capacitor registers a DownloadListener on
+//   the WebView that passes blob downloads to Android's DownloadManager, so the
+//   file lands in the device's Downloads folder just like a browser download.
+//
 export async function downloadSingleFile(
   data: Uint8Array,
   filename: string,
@@ -30,14 +42,18 @@ export async function downloadSingleFile(
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  setTimeout(() => URL.revokeObjectURL(url), 8000);
 }
 
-// ─── Save individual files to a chosen folder (File System Access API) ───────
-
+// ─── Save files directly to a user-chosen folder ─────────────────────────────
+//   Uses the File System Access API (showDirectoryPicker).
+//   Supported in: Chrome 86+ desktop, Chrome 109+ Android, Capacitor WebView
+//   on Android 10+ (uses Chromium engine).
+//
 export async function saveToChosenFolder(items: ExportItem[], format: ExportFormat): Promise<number> {
   const dirHandle = await (window as unknown as {
     showDirectoryPicker: (opts?: { mode: string }) => Promise<FileSystemDirectoryHandle>
@@ -48,7 +64,6 @@ export async function saveToChosenFolder(items: ExportItem[], format: ExportForm
     const folder = sanitize(item.folderName);
     const docName = sanitize(item.name);
 
-    // Create sub-folder matching the Flexcil folder structure
     const subDir = await dirHandle.getDirectoryHandle(folder, { create: true });
 
     if ((format === 'pdfs' || format === 'all') && item.pdfData) {
@@ -70,8 +85,9 @@ export async function saveToChosenFolder(items: ExportItem[], format: ExportForm
   return saved;
 }
 
-// ─── Build ZIP and trigger download ──────────────────────────────────────────
-
+// ─── Bundle and download as a ZIP file ───────────────────────────────────────
+//   Works in both browser and Capacitor WebView via DownloadManager.
+//
 export async function exportAsZip(
   items: ExportItem[],
   format: ExportFormat = 'all',
@@ -101,15 +117,37 @@ export async function exportAsZip(
 
     zip(files, { level: 0 }, (err, data) => {
       if (err) { reject(err); return; }
-      const blob = new Blob([data], { type: 'application/zip' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${sanitize(zipName)}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+      if (isCapacitor()) {
+        // In Capacitor WebView, trigger download via a temporary <a> element.
+        // The WebView's DownloadListener intercepts blob: URLs and routes them
+        // through Android's DownloadManager → saved to device Downloads folder.
+        const blob = new Blob([data], { type: 'application/zip' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${sanitize(zipName)}.zip`;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        // Small delay before removing to let the WebView intercept
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 2000);
+      } else {
+        // Standard browser download
+        const blob = new Blob([data], { type: 'application/zip' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${sanitize(zipName)}.zip`;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      }
       resolve();
     });
   });
