@@ -101,7 +101,7 @@ export function DocumentViewer({ doc, folderName }: DocumentViewerProps) {
                   </div>
                 )}
                 <div className="text-xs text-muted-foreground">
-                  {formatFileSize(doc.flxData?.length ?? 0)}
+                  {formatFileSize(doc.flxSize ?? 0)}
                 </div>
               </div>
             )}
@@ -272,7 +272,7 @@ function InfoTab({ doc, folderName, displayName }: { doc: FlexDocument; folderNa
           )}
           {doc.info?.createDate && <InfoRow label="Created" value={formatDate(doc.info.createDate)} />}
           {doc.info?.modifiedDate && <InfoRow label="Modified" value={formatDate(doc.info.modifiedDate)} />}
-          <InfoRow label=".flx File Size" value={formatFileSize(doc.flxData?.length ?? 0)} />
+          <InfoRow label=".flx File Size" value={formatFileSize(doc.flxSize ?? 0)} />
           {doc.pdfData && <InfoRow label="PDF Size" value={formatFileSize(doc.pdfData.length)} />}
           {doc.thumbnail && <InfoRow label="Preview Size" value={formatFileSize(doc.thumbnail.length)} />}
         </InfoSection>

@@ -5,8 +5,8 @@ import { DocumentViewer } from '@/components/DocumentViewer';
 import { WelcomePane } from '@/components/WelcomePane';
 import { ExportBar } from '@/components/ExportBar';
 import { ThemeProvider } from '@/lib/theme';
-import type { FlexBackup, FlexDocument } from '@/lib/flexcil-parser';
-import { parseFlexFile } from '@/lib/flexcil-parser';
+import type { FlexBackup, FlexDocument, FolderNode } from '@/lib/flexcil-parser';
+import { parseFlexFile, getAllDocsInFolder } from '@/lib/flexcil-parser';
 
 function AppInner() {
   const [backup, setBackup] = useState<FlexBackup | null>(null);
@@ -37,9 +37,9 @@ function AppInner() {
     }
   }, []);
 
-  const handleSelectDoc = useCallback((doc: FlexDocument, folderName: string) => {
+  const handleSelectDoc = useCallback((doc: FlexDocument, folderPath: string) => {
     setSelectedDoc(doc);
-    setSelectedFolder(folderName);
+    setSelectedFolder(folderPath);
   }, []);
 
   const handleReset = useCallback(() => {
@@ -50,26 +50,31 @@ function AppInner() {
     setCheckedDocs(new Map());
   }, []);
 
-  const handleToggleCheck = useCallback((key: string, doc: FlexDocument, folderName: string) => {
+  const handleToggleCheck = useCallback((key: string, doc: FlexDocument, folderPath: string) => {
     setCheckedDocs((prev) => {
       const next = new Map(prev);
       if (next.has(key)) {
         next.delete(key);
       } else {
-        next.set(key, { doc, folderName });
+        next.set(key, { doc, folderName: folderPath });
       }
       return next;
     });
   }, []);
 
-  const handleToggleFolderCheck = useCallback((folderName: string, docs: FlexDocument[]) => {
+  const handleToggleFolderCheck = useCallback((folder: FolderNode) => {
     setCheckedDocs((prev) => {
       const next = new Map(prev);
-      const allChecked = docs.every((d) => next.has(folderName + '/' + d.name));
+      const allDocs = getAllDocsInFolder(folder);
+      const allChecked = allDocs.every(({ doc, folderPath }) =>
+        next.has(`${folderPath}/${doc.name}`)
+      );
       if (allChecked) {
-        docs.forEach((d) => next.delete(folderName + '/' + d.name));
+        allDocs.forEach(({ doc, folderPath }) => next.delete(`${folderPath}/${doc.name}`));
       } else {
-        docs.forEach((d) => next.set(folderName + '/' + d.name, { doc: d, folderName }));
+        allDocs.forEach(({ doc, folderPath }) =>
+          next.set(`${folderPath}/${doc.name}`, { doc, folderName: folderPath })
+        );
       }
       return next;
     });

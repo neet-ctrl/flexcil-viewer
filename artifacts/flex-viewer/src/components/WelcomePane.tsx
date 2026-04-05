@@ -1,6 +1,6 @@
 import { FileText, Folder, Info, Download, Package } from 'lucide-react';
-import type { FlexBackup, FlexDocument } from '@/lib/flexcil-parser';
-import { formatDate, formatFileSize } from '@/lib/flexcil-parser';
+import type { FlexBackup, FlexDocument, FolderNode } from '@/lib/flexcil-parser';
+import { formatDate, formatFileSize, getAllDocuments } from '@/lib/flexcil-parser';
 import { exportAsZip } from '@/lib/zip-export';
 import { useState } from 'react';
 
@@ -8,31 +8,30 @@ interface WelcomePaneProps {
   backup: FlexBackup;
 }
 
+function countFolders(folders: FolderNode[]): number {
+  return folders.reduce((s, f) => s + 1 + countFolders(f.subfolders), 0);
+}
+
 export function WelcomePane({ backup }: WelcomePaneProps) {
   const [exporting, setExporting] = useState(false);
 
-  const totalSize = backup.folders.reduce(
-    (sum, f) => sum + f.documents.reduce((s, d) => s + (d.flxData?.length ?? 0), 0),
-    0
-  );
-  const totalPdfs = backup.folders.reduce(
-    (sum, f) => sum + f.documents.filter((d) => d.pdfData).length,
-    0
-  );
+  const allDocs = getAllDocuments(backup.rootFolders);
 
-  const allDocs = backup.folders.flatMap((f) =>
-    f.documents.map((d) => ({
-      name: d.info?.name ?? d.name,
-      pdfData: d.pdfData,
-      thumbnail: d.thumbnail,
-      folderName: f.name,
-    }))
-  );
+  const totalSize = allDocs.reduce((sum, { doc }) => sum + (doc.flxSize ?? 0), 0);
+  const totalPdfs = allDocs.filter(({ doc }) => doc.pdfData).length;
+  const totalFolders = countFolders(backup.rootFolders);
+
+  const exportItems = allDocs.map(({ doc, folderPath }) => ({
+    name: doc.info?.name ?? doc.name,
+    pdfData: doc.pdfData,
+    thumbnail: doc.thumbnail,
+    folderName: folderPath,
+  }));
 
   async function exportAllPdfs() {
     setExporting(true);
     try {
-      await exportAsZip(allDocs, 'pdfs', backup.info.appName || 'flexcil_export');
+      await exportAsZip(exportItems, 'pdfs', backup.info.appName || 'flexcil_export');
     } catch (e) {
       alert('Export failed: ' + (e as Error).message);
     } finally {
@@ -43,7 +42,7 @@ export function WelcomePane({ backup }: WelcomePaneProps) {
   async function exportAll() {
     setExporting(true);
     try {
-      await exportAsZip(allDocs, 'all', backup.info.appName || 'flexcil_export');
+      await exportAsZip(exportItems, 'all', backup.info.appName || 'flexcil_export');
     } catch (e) {
       alert('Export failed: ' + (e as Error).message);
     } finally {
@@ -62,10 +61,10 @@ export function WelcomePane({ backup }: WelcomePaneProps) {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          <StatCard icon={<Folder className="w-5 h-5 text-primary" />} value={backup.folders.length} label="Folders" color="blue" />
-          <StatCard icon={<FileText className="w-5 h-5 text-green-600" />} value={backup.totalDocuments} label="Documents" color="green" />
-          <StatCard icon={<FileText className="w-5 h-5 text-orange-500" />} value={totalPdfs} label="With PDF" color="orange" />
-          <StatCard icon={<Info className="w-5 h-5 text-purple-500" />} value={formatFileSize(totalSize)} label="Total Size" color="purple" />
+          <StatCard icon={<Folder className="w-5 h-5 text-primary" />} value={totalFolders} label="Folders" />
+          <StatCard icon={<FileText className="w-5 h-5 text-green-600" />} value={backup.totalDocuments} label="Documents" />
+          <StatCard icon={<FileText className="w-5 h-5 text-orange-500" />} value={totalPdfs} label="With PDF" />
+          <StatCard icon={<Info className="w-5 h-5 text-purple-500" />} value={formatFileSize(totalSize)} label="Total Size" />
         </div>
 
         <div className="rounded-xl border border-border bg-card p-5 mb-4">
@@ -107,43 +106,69 @@ export function WelcomePane({ backup }: WelcomePaneProps) {
 
         <div className="rounded-xl border border-border bg-card p-5">
           <h2 className="font-semibold mb-3 text-sm">Folder Contents</h2>
-          <div className="space-y-3">
-            {backup.folders.map((folder) => (
-              <div key={folder.name} className="p-3 rounded-lg bg-muted/40 border border-border">
-                <div className="flex items-center gap-2 mb-2">
-                  <Folder className="w-4 h-4 text-primary" />
-                  <span className="font-medium text-sm">{folder.name}</span>
-                  <span className="text-xs text-muted-foreground ml-auto">
-                    {folder.documents.filter((d) => d.pdfData).length}/{folder.documents.length} PDFs
-                  </span>
-                </div>
-                <div className="space-y-1">
-                  {folder.documents.slice(0, 6).map((doc: FlexDocument) => (
-                    <div key={doc.name} className="flex items-center gap-2 text-xs text-muted-foreground pl-6">
-                      <FileText className="w-3 h-3 shrink-0" />
-                      <span className="truncate flex-1">{doc.info?.name ?? doc.name}</span>
-                      {doc.pdfData && <span className="text-blue-500 shrink-0">PDF</span>}
-                      {doc.info?.modifiedDate && (
-                        <span className="shrink-0 hidden sm:inline">{formatDate(doc.info.modifiedDate)}</span>
-                      )}
-                    </div>
-                  ))}
-                  {folder.documents.length > 6 && (
-                    <p className="text-xs text-muted-foreground pl-6">
-                      +{folder.documents.length - 6} more...
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+          <FolderTree folders={backup.rootFolders} depth={0} />
         </div>
       </div>
     </div>
   );
 }
 
-function StatCard({ icon, value, label }: { icon: React.ReactNode; value: string | number; label: string; color: string }) {
+function FolderTree({ folders, depth }: { folders: FolderNode[]; depth: number }) {
+  return (
+    <div className="space-y-2">
+      {folders.map((folder) => (
+        <FolderSummary key={folder.fullPath} folder={folder} depth={depth} />
+      ))}
+    </div>
+  );
+}
+
+function FolderSummary({ folder, depth }: { folder: FolderNode; depth: number }) {
+  const pdfCount = folder.documents.filter((d) => d.pdfData).length;
+  const indent = depth * 16;
+
+  return (
+    <div style={{ marginLeft: indent }}>
+      <div className="p-3 rounded-lg bg-muted/40 border border-border">
+        <div className="flex items-center gap-2 mb-2">
+          <Folder className="w-4 h-4 text-primary shrink-0" />
+          <span className="font-medium text-sm">{folder.name}</span>
+          {folder.documents.length > 0 && (
+            <span className="text-xs text-muted-foreground ml-auto">
+              {pdfCount}/{folder.documents.length} PDFs
+            </span>
+          )}
+        </div>
+
+        {folder.documents.length > 0 && (
+          <div className="space-y-1 mb-2">
+            {folder.documents.slice(0, 5).map((doc: FlexDocument) => (
+              <div key={doc.name} className="flex items-center gap-2 text-xs text-muted-foreground pl-6">
+                <FileText className="w-3 h-3 shrink-0" />
+                <span className="truncate flex-1">{doc.info?.name ?? doc.name}</span>
+                {doc.pdfData && <span className="text-blue-500 shrink-0">PDF</span>}
+                {doc.info?.modifiedDate && (
+                  <span className="shrink-0 hidden sm:inline">{formatDate(doc.info.modifiedDate)}</span>
+                )}
+              </div>
+            ))}
+            {folder.documents.length > 5 && (
+              <p className="text-xs text-muted-foreground pl-6">
+                +{folder.documents.length - 5} more...
+              </p>
+            )}
+          </div>
+        )}
+
+        {folder.subfolders.length > 0 && (
+          <FolderTree folders={folder.subfolders} depth={depth + 1} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ icon, value, label }: { icon: React.ReactNode; value: string | number; label: string }) {
   return (
     <div className="rounded-xl border border-border bg-card p-4 flex flex-col items-center gap-2 text-center">
       {icon}
